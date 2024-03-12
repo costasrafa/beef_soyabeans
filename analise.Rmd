@@ -1,0 +1,1008 @@
+---
+title: "Estabelecimentos criação e abate de gado na Amazônia Legal"
+author: "Rafael da Costa"
+date: "2024-03-05"
+output: 
+  html_document:
+    df_print: paged
+---
+
+```{r, echo=FALSE}
+#adicionando essa linha de código para não precisar repetir os parâmetros em todos os chunks
+knitr::opts_chunk$set(error=FALSE, warning=FALSE, message=FALSE, echo = FALSE)
+```
+
+
+
+```{r}
+#Aqui vamos carregar os pacotes usados para análise
+library(tidyverse) #pacote para tratar os dados coletados
+library(lubridate) #pacote para lidar com datas
+library(xlsx) #pacote para lidar com arquivos excel
+library(ggthemes) #pacote com temas para gráficos
+library(viridis) #pacote com cores para gráficos
+library(sf) #pacote para trabalhar com dados espaciais
+library(geobr) #pacote para trabalhar com dados espaciais brasileiros
+library(magick) #pacote para fazer gif
+
+#Nessa linha de código ajustamos o padrão dos gráficos que serão usados
+theme_set(theme_bw())
+```
+
+
+**Para este relatório descritivo foram usados os seguintes bancos de dados**:
+
+1 - **Relação Anual de Informações Sociais** (RAIS, 
+https://bi.mte.gov.br/bgcaged/login.php): através da seleção "Abate e Fabricação de Produtos de Carne" (Grupo) e "Criação de Bovinos" (Classe) na CNAE 2.0 para o período 2006-2021, "Abate e Preparação de Produtos de Carne e de Pescado" (Grupo) e "Criação de Bovinos" (Classe) na CNAE 95 Grupo para o período 2003-2005, por município brasileiro, com empresas com Rais negativa igual a "não" em 31/12 no respectivo ano-calendário, coletamos as variáveis "Número de Estabelecimentos" e "Número de Vínculos Ativos" (que abrange celetistas e categorias indeterminadas de não celetistas);
+
+2 - **Pesquisa Pecuária Municipal** do Instituto Brasileiro de Geografia e Estatística (https://sidra.ibge.gov.br/pesquisa/ppm/quadros/brasil/2022): através da requisição dos números de rebanho bovino entre 2003 e 2022 ao SIDRA.
+
+1. Amostra randômica com 100 observações dos dados completos do número de estabelecimentos de criação de bovinos, por município brasileiro (2003-2021, RAIS):
+
+```{r}
+#Aqui vamos importar os dados de Criação Bovina
+n_estab_criacao_bovina_2003_2005 <-  read.delim("estab_mun_criacao_bovino_2003_2005.csv",
+           header = TRUE, 
+           sep = ";", encoding = "latin1") %>% 
+  rename(Municipio = 'Município',
+         '2005' = X2005,
+         '2004' = X2004,
+         '2003' = X2003) %>% 
+  separate(Municipio, c("Estado", "Municipio"), sep = "-", extra = "merge") %>% 
+  mutate(Estado = toupper(Estado)) %>% 
+  pivot_longer(cols = c('2005', '2004','2003'),
+               names_to = "ano",
+               values_to = "n_estabelecimentos") %>%
+  mutate(ano=as.Date(ano, format="%Y"),
+         ano=as.numeric(format(ano, "%Y")),
+         regiao=case_when(Estado=="RO"~"Norte",
+                                Estado=="AC"~"Norte",
+                                Estado=="AM"~"Norte",
+                                Estado=="RR"~"Norte",
+                                Estado=="PA"~"Norte",
+                                Estado=="AP"~"Norte",
+                                Estado=="TO"~"Norte",
+                                Estado=="MA"~"Nordeste",
+                                Estado=="PI"~"Nordeste",
+                                Estado=="CE"~"Nordeste",
+                                Estado=="RN"~"Nordeste",
+                                Estado=="PB"~"Nordeste",
+                                Estado=="PE"~"Nordeste",
+                                Estado=="AL"~"Nordeste",
+                                Estado=="SE"~"Nordeste",
+                                Estado=="BA"~"Nordeste",
+                                Estado=="MG"~"Sudeste",
+                                Estado=="ES"~"Sudeste",
+                                Estado=="RJ"~"Sudeste",
+                                Estado=="SP"~"Sudeste",
+                                Estado=="PR"~"Sul",
+                                Estado=="SC"~"Sul",
+                                Estado=="RS"~"Sul",
+                                Estado=="MS"~"Centro-Oeste",
+                                Estado=="MT"~"Centro-Oeste",
+                                Estado=="GO"~"Centro-Oeste",
+                                Estado=="DF"~"Centro-Oeste"),
+         Municipio = str_replace(Municipio, "D Oeste", "D'Oeste"),
+         Municipio = str_replace(Municipio, "D Arco", "D'Arco"),
+         Municipio = str_replace(Municipio, "Poxoreo", "Poxoreu"),
+         Municipio = str_replace(Municipio, "Fortaleza do Tabocao", "Tabocao"),
+         Municipio = str_replace(Municipio, "Pio Xii", "Pio XII"),
+         Municipio = str_replace(Municipio, "Olho D Agua das Cunhas", "Olho d'Agua das Cunhas")) %>% 
+  filter(Municipio!="Ignorado")
+
+n_estab_criacao_bovina_2006_2016 <-  read.delim("estab_mun_criacao_bovino_2006_2016.csv",
+           header = TRUE, 
+           sep = ";", encoding = "latin1") %>% 
+  rename(Municipio = 'Município',
+         '2006' = X2006,
+         '2007' = X2007,
+         '2008' = X2008,
+         '2009' = X2009,
+         '2010' = X2010,
+         '2011' = X2011,
+         '2012' = X2012,
+         '2013' = X2013,
+         '2014' = X2014,
+         '2015' = X2015,
+         '2016' = X2016) %>% 
+  separate(Municipio, c("Estado", "Municipio"), sep = "-", extra = "merge") %>% 
+  mutate(Estado = toupper(Estado)) %>% 
+  pivot_longer(cols = c('2006', '2007','2008','2009','2010','2011','2012',
+                        '2013','2014','2015','2016'),
+               names_to = "ano",
+               values_to = "n_estabelecimentos") %>%
+  mutate(ano=as.Date(ano, format="%Y"),
+         ano=as.numeric(format(ano, "%Y")),
+         regiao=case_when(Estado=="RO"~"Norte",
+                                Estado=="AC"~"Norte",
+                                Estado=="AM"~"Norte",
+                                Estado=="RR"~"Norte",
+                                Estado=="PA"~"Norte",
+                                Estado=="AP"~"Norte",
+                                Estado=="TO"~"Norte",
+                                Estado=="MA"~"Nordeste",
+                                Estado=="PI"~"Nordeste",
+                                Estado=="CE"~"Nordeste",
+                                Estado=="RN"~"Nordeste",
+                                Estado=="PB"~"Nordeste",
+                                Estado=="PE"~"Nordeste",
+                                Estado=="AL"~"Nordeste",
+                                Estado=="SE"~"Nordeste",
+                                Estado=="BA"~"Nordeste",
+                                Estado=="MG"~"Sudeste",
+                                Estado=="ES"~"Sudeste",
+                                Estado=="RJ"~"Sudeste",
+                                Estado=="SP"~"Sudeste",
+                                Estado=="PR"~"Sul",
+                                Estado=="SC"~"Sul",
+                                Estado=="RS"~"Sul",
+                                Estado=="MS"~"Centro-Oeste",
+                                Estado=="MT"~"Centro-Oeste",
+                                Estado=="GO"~"Centro-Oeste",
+                                Estado=="DF"~"Centro-Oeste"),
+         Municipio = str_replace(Municipio, "D Oeste", "D'Oeste"),
+         Municipio = str_replace(Municipio, "D Arco", "D'Arco"),
+         Municipio = str_replace(Municipio, "Poxoreo", "Poxoreu"),
+         Municipio = str_replace(Municipio, "Fortaleza do Tabocao", "Tabocao"),
+         Municipio = str_replace(Municipio, "Pio Xii", "Pio XII"),
+         Municipio = str_replace(Municipio, "Olho D Agua das Cunhas", "Olho d'Agua das Cunhas"))%>% 
+  filter(Municipio!="Ignorado")
+
+n_estab_criacao_bovina_2017_2021 <- read.delim("estab_mun_criacao_bovino_2017_2021.csv",
+           header = TRUE, 
+           sep = ";", encoding = "latin1") %>% 
+  rename(Municipio = 'Município',
+         '2017' = X2017,
+         '2018' = X2018,
+         '2019' = X2019,
+         '2020' = X2020,
+         '2021' = X2021) %>% 
+  separate(Municipio, c("Estado", "Municipio"), sep = "-", extra = "merge") %>% 
+  mutate(Estado = toupper(Estado)) %>% 
+  pivot_longer(cols = c('2017','2018','2019','2020','2021'),
+               names_to = "ano",
+               values_to = "n_estabelecimentos") %>%
+  mutate(ano=as.Date(ano, format="%Y"),
+         ano=as.numeric(format(ano, "%Y")),
+         regiao=case_when(Estado=="RO"~"Norte",
+                                Estado=="AC"~"Norte",
+                                Estado=="AM"~"Norte",
+                                Estado=="RR"~"Norte",
+                                Estado=="PA"~"Norte",
+                                Estado=="AP"~"Norte",
+                                Estado=="TO"~"Norte",
+                                Estado=="MA"~"Nordeste",
+                                Estado=="PI"~"Nordeste",
+                                Estado=="CE"~"Nordeste",
+                                Estado=="RN"~"Nordeste",
+                                Estado=="PB"~"Nordeste",
+                                Estado=="PE"~"Nordeste",
+                                Estado=="AL"~"Nordeste",
+                                Estado=="SE"~"Nordeste",
+                                Estado=="BA"~"Nordeste",
+                                Estado=="MG"~"Sudeste",
+                                Estado=="ES"~"Sudeste",
+                                Estado=="RJ"~"Sudeste",
+                                Estado=="SP"~"Sudeste",
+                                Estado=="PR"~"Sul",
+                                Estado=="SC"~"Sul",
+                                Estado=="RS"~"Sul",
+                                Estado=="MS"~"Centro-Oeste",
+                                Estado=="MT"~"Centro-Oeste",
+                                Estado=="GO"~"Centro-Oeste",
+                                Estado=="DF"~"Centro-Oeste"),
+         Municipio = str_replace(Municipio, "D Oeste", "D'Oeste"),
+         Municipio = str_replace(Municipio, "D Arco", "D'Arco"),
+         Municipio = str_replace(Municipio, "Poxoreo", "Poxoreu"),
+         Municipio = str_replace(Municipio, "Fortaleza do Tabocao", "Tabocao"),
+         Municipio = str_replace(Municipio, "Pio Xii", "Pio XII"),
+         Municipio = str_replace(Municipio, "Olho D Agua das Cunhas", "Olho d'Agua das Cunhas"))%>% 
+  filter(Municipio!="Ignorado")
+
+n_estab_criacao_bovina_2003_2021 <- rbind(n_estab_criacao_bovina_2003_2005, n_estab_criacao_bovina_2006_2016, n_estab_criacao_bovina_2017_2021)
+
+rm(n_estab_criacao_bovina_2003_2005, n_estab_criacao_bovina_2006_2016, n_estab_criacao_bovina_2017_2021)
+
+set.seed(376423)
+n_estab_criacao_bovina_2003_2021 %>% 
+  sample_n(100)
+```
+
+2. Amostra randômica com 100 observações dos dados completos do número de vínculos (celetistas e não-celetistas) dos estabelecimentos de criação de bovinos, por município brasileiro (2003-2021, RAIS):
+
+```{r}
+n_vinculos_criacao_bovina_2003_2005 <- read.delim("vinculo_mun_criacao_bovino_2003_2005.csv",
+           header = TRUE, 
+           sep = ";", encoding = "latin1") %>% 
+  rename(Municipio = 'Município',
+         '2005' = X2005,
+         '2004' = X2004,
+         '2003' = X2003) %>% 
+  separate(Municipio, c("Estado", "Municipio"), sep = "-", extra = "merge") %>% 
+  mutate(Estado = toupper(Estado)) %>% 
+  pivot_longer(cols = c('2005', '2004','2003'),
+               names_to = "ano",
+               values_to = "n_vinculos") %>%
+  mutate(ano=as.Date(ano, format="%Y"),
+         ano=as.numeric(format(ano, "%Y")),
+         regiao=case_when(Estado=="RO"~"Norte",
+                                Estado=="AC"~"Norte",
+                                Estado=="AM"~"Norte",
+                                Estado=="RR"~"Norte",
+                                Estado=="PA"~"Norte",
+                                Estado=="AP"~"Norte",
+                                Estado=="TO"~"Norte",
+                                Estado=="MA"~"Nordeste",
+                                Estado=="PI"~"Nordeste",
+                                Estado=="CE"~"Nordeste",
+                                Estado=="RN"~"Nordeste",
+                                Estado=="PB"~"Nordeste",
+                                Estado=="PE"~"Nordeste",
+                                Estado=="AL"~"Nordeste",
+                                Estado=="SE"~"Nordeste",
+                                Estado=="BA"~"Nordeste",
+                                Estado=="MG"~"Sudeste",
+                                Estado=="ES"~"Sudeste",
+                                Estado=="RJ"~"Sudeste",
+                                Estado=="SP"~"Sudeste",
+                                Estado=="PR"~"Sul",
+                                Estado=="SC"~"Sul",
+                                Estado=="RS"~"Sul",
+                                Estado=="MS"~"Centro-Oeste",
+                                Estado=="MT"~"Centro-Oeste",
+                                Estado=="GO"~"Centro-Oeste",
+                                Estado=="DF"~"Centro-Oeste"),
+         Municipio = str_replace(Municipio, "D Oeste", "D'Oeste"),
+         Municipio = str_replace(Municipio, "D Arco", "D'Arco"),
+         Municipio = str_replace(Municipio, "Poxoreo", "Poxoreu"),
+         Municipio = str_replace(Municipio, "Fortaleza do Tabocao", "Tabocao"),
+         Municipio = str_replace(Municipio, "Pio Xii", "Pio XII"),
+         Municipio = str_replace(Municipio, "Olho D Agua das Cunhas", "Olho d'Agua das Cunhas"))%>% 
+  filter(Municipio!="Ignorado")
+
+n_vinculos_criacao_bovina_2006_2016 <- read.delim("vinculo_mun_criacao_bovino_2006_2016.csv",
+           header = TRUE, 
+           sep = ";", encoding = "latin1") %>% 
+  rename(Municipio = 'Município',
+         '2006' = X2006,
+         '2007' = X2007,
+         '2008' = X2008,
+         '2009' = X2009,
+         '2010' = X2010,
+         '2011' = X2011,
+         '2012' = X2012,
+         '2013' = X2013,
+         '2014' = X2014,
+         '2015' = X2015,
+         '2016' = X2016) %>% 
+  separate(Municipio, c("Estado", "Municipio"), sep = "-", extra = "merge") %>% 
+  mutate(Estado = toupper(Estado)) %>% 
+  pivot_longer(cols = c('2006', '2007','2008','2009','2010','2011','2012',
+                        '2013','2014','2015','2016'),
+               names_to = "ano",
+               values_to = "n_vinculos") %>%
+  mutate(ano=as.Date(ano, format="%Y"),
+         ano=as.numeric(format(ano, "%Y")),
+         regiao=case_when(Estado=="RO"~"Norte",
+                                Estado=="AC"~"Norte",
+                                Estado=="AM"~"Norte",
+                                Estado=="RR"~"Norte",
+                                Estado=="PA"~"Norte",
+                                Estado=="AP"~"Norte",
+                                Estado=="TO"~"Norte",
+                                Estado=="MA"~"Nordeste",
+                                Estado=="PI"~"Nordeste",
+                                Estado=="CE"~"Nordeste",
+                                Estado=="RN"~"Nordeste",
+                                Estado=="PB"~"Nordeste",
+                                Estado=="PE"~"Nordeste",
+                                Estado=="AL"~"Nordeste",
+                                Estado=="SE"~"Nordeste",
+                                Estado=="BA"~"Nordeste",
+                                Estado=="MG"~"Sudeste",
+                                Estado=="ES"~"Sudeste",
+                                Estado=="RJ"~"Sudeste",
+                                Estado=="SP"~"Sudeste",
+                                Estado=="PR"~"Sul",
+                                Estado=="SC"~"Sul",
+                                Estado=="RS"~"Sul",
+                                Estado=="MS"~"Centro-Oeste",
+                                Estado=="MT"~"Centro-Oeste",
+                                Estado=="GO"~"Centro-Oeste",
+                                Estado=="DF"~"Centro-Oeste"),
+         Municipio = str_replace(Municipio, "D Oeste", "D'Oeste"),
+         Municipio = str_replace(Municipio, "D Arco", "D'Arco"),
+         Municipio = str_replace(Municipio, "Poxoreo", "Poxoreu"),
+         Municipio = str_replace(Municipio, "Fortaleza do Tabocao", "Tabocao"),
+         Municipio = str_replace(Municipio, "Pio Xii", "Pio XII"),
+         Municipio = str_replace(Municipio, "Olho D Agua das Cunhas", "Olho d'Agua das Cunhas"))%>% 
+  filter(Municipio!="Ignorado")
+
+n_vinculos_criacao_bovina_2017_2021 <- read.delim("vinculo_mun_criacao_bovino_2017_2021.csv",
+           header = TRUE, 
+           sep = ";", encoding = "latin1") %>% 
+  rename(Municipio = 'Município',
+         '2017' = X2017,
+         '2018' = X2018,
+         '2019' = X2019,
+         '2020' = X2020,
+         '2021' = X2021) %>% 
+  separate(Municipio, c("Estado", "Municipio"), sep = "-", extra = "merge") %>% 
+  mutate(Estado = toupper(Estado)) %>% 
+  pivot_longer(cols = c('2017','2018','2019','2020','2021'),
+               names_to = "ano",
+               values_to = "n_vinculos") %>%
+  mutate(ano=as.Date(ano, format="%Y"),
+         ano=as.numeric(format(ano, "%Y")),
+         regiao=case_when(Estado=="RO"~"Norte",
+                                Estado=="AC"~"Norte",
+                                Estado=="AM"~"Norte",
+                                Estado=="RR"~"Norte",
+                                Estado=="PA"~"Norte",
+                                Estado=="AP"~"Norte",
+                                Estado=="TO"~"Norte",
+                                Estado=="MA"~"Nordeste",
+                                Estado=="PI"~"Nordeste",
+                                Estado=="CE"~"Nordeste",
+                                Estado=="RN"~"Nordeste",
+                                Estado=="PB"~"Nordeste",
+                                Estado=="PE"~"Nordeste",
+                                Estado=="AL"~"Nordeste",
+                                Estado=="SE"~"Nordeste",
+                                Estado=="BA"~"Nordeste",
+                                Estado=="MG"~"Sudeste",
+                                Estado=="ES"~"Sudeste",
+                                Estado=="RJ"~"Sudeste",
+                                Estado=="SP"~"Sudeste",
+                                Estado=="PR"~"Sul",
+                                Estado=="SC"~"Sul",
+                                Estado=="RS"~"Sul",
+                                Estado=="MS"~"Centro-Oeste",
+                                Estado=="MT"~"Centro-Oeste",
+                                Estado=="GO"~"Centro-Oeste",
+                                Estado=="DF"~"Centro-Oeste"),
+         Municipio = str_replace(Municipio, "D Oeste", "D'Oeste"),
+         Municipio = str_replace(Municipio, "D Arco", "D'Arco"),
+         Municipio = str_replace(Municipio, "Poxoreo", "Poxoreu"),
+         Municipio = str_replace(Municipio, "Fortaleza do Tabocao", "Tabocao"),
+         Municipio = str_replace(Municipio, "Pio Xii", "Pio XII"),
+         Municipio = str_replace(Municipio, "Olho D Agua das Cunhas", "Olho d'Agua das Cunhas"))%>% 
+  filter(Municipio!="Ignorado")
+
+n_vinculos_criacao_bovina_2003_2021 <- rbind(n_vinculos_criacao_bovina_2003_2005, n_vinculos_criacao_bovina_2006_2016, n_vinculos_criacao_bovina_2017_2021)
+
+rm(n_vinculos_criacao_bovina_2003_2005, n_vinculos_criacao_bovina_2006_2016, n_vinculos_criacao_bovina_2017_2021)
+
+set.seed(793721)
+n_vinculos_criacao_bovina_2003_2021 %>% 
+  sample_n(100)
+```
+
+3. Amostra randômica com 100 observações dos dados completos do número de estabelecimentos de abate de carne bovina, por município brasileiro (2003-2021, RAIS):
+
+```{r}
+# Aqui vamos importar os dados da Indústria da Carne
+n_estab_abatecarne_2003_2005 <-  read.delim("estab_mun_abate_prodcarne_2003_2005.csv",
+           header = TRUE, 
+           sep = ";", encoding = "latin1") %>% 
+  rename(Municipio = 'Município',
+         '2005' = X2005,
+         '2004' = X2004,
+         '2003' = X2003) %>% 
+  separate(Municipio, c("Estado", "Municipio"), sep = "-", extra = "merge") %>% 
+  mutate(Estado = toupper(Estado)) %>% 
+  pivot_longer(cols = c('2005', '2004','2003'),
+               names_to = "ano",
+               values_to = "n_estabelecimentos") %>%
+  mutate(ano=as.Date(ano, format="%Y"),
+         ano=as.numeric(format(ano, "%Y")),
+         regiao=case_when(Estado=="RO"~"Norte",
+                                Estado=="AC"~"Norte",
+                                Estado=="AM"~"Norte",
+                                Estado=="RR"~"Norte",
+                                Estado=="PA"~"Norte",
+                                Estado=="AP"~"Norte",
+                                Estado=="TO"~"Norte",
+                                Estado=="MA"~"Nordeste",
+                                Estado=="PI"~"Nordeste",
+                                Estado=="CE"~"Nordeste",
+                                Estado=="RN"~"Nordeste",
+                                Estado=="PB"~"Nordeste",
+                                Estado=="PE"~"Nordeste",
+                                Estado=="AL"~"Nordeste",
+                                Estado=="SE"~"Nordeste",
+                                Estado=="BA"~"Nordeste",
+                                Estado=="MG"~"Sudeste",
+                                Estado=="ES"~"Sudeste",
+                                Estado=="RJ"~"Sudeste",
+                                Estado=="SP"~"Sudeste",
+                                Estado=="PR"~"Sul",
+                                Estado=="SC"~"Sul",
+                                Estado=="RS"~"Sul",
+                                Estado=="MS"~"Centro-Oeste",
+                                Estado=="MT"~"Centro-Oeste",
+                                Estado=="GO"~"Centro-Oeste",
+                                Estado=="DF"~"Centro-Oeste"),
+         Municipio = str_replace(Municipio, "D Oeste", "D'Oeste"),
+         Municipio = str_replace(Municipio, "D Arco", "D'Arco"),
+         Municipio = str_replace(Municipio, "Poxoreo", "Poxoreu"),
+         Municipio = str_replace(Municipio, "Fortaleza do Tabocao", "Tabocao"),
+         Municipio = str_replace(Municipio, "Pio Xii", "Pio XII"),
+         Municipio = str_replace(Municipio, "Olho D Agua das Cunhas", "Olho d'Agua das Cunhas"))%>% 
+  filter(Municipio!="Ignorado")
+
+n_estab_abatecarne_2006_2016 <-  read.delim("estab_mun_abate_prodcarne_2006_2016.csv",
+           header = TRUE, 
+           sep = ";", encoding = "latin1") %>% 
+  rename(Municipio = 'Município',
+         '2006' = X2006,
+         '2007' = X2007,
+         '2008' = X2008,
+         '2009' = X2009,
+         '2010' = X2010,
+         '2011' = X2011,
+         '2012' = X2012,
+         '2013' = X2013,
+         '2014' = X2014,
+         '2015' = X2015,
+         '2016' = X2016) %>% 
+  separate(Municipio, c("Estado", "Municipio"), sep = "-", extra = "merge") %>% 
+  mutate(Estado = toupper(Estado)) %>% 
+  pivot_longer(cols = c('2006', '2007','2008','2009','2010','2011','2012',
+                        '2013','2014','2015','2016'),
+               names_to = "ano",
+               values_to = "n_estabelecimentos") %>%
+  mutate(ano=as.Date(ano, format="%Y"),
+         ano=as.numeric(format(ano, "%Y")),
+         regiao=case_when(Estado=="RO"~"Norte",
+                                Estado=="AC"~"Norte",
+                                Estado=="AM"~"Norte",
+                                Estado=="RR"~"Norte",
+                                Estado=="PA"~"Norte",
+                                Estado=="AP"~"Norte",
+                                Estado=="TO"~"Norte",
+                                Estado=="MA"~"Nordeste",
+                                Estado=="PI"~"Nordeste",
+                                Estado=="CE"~"Nordeste",
+                                Estado=="RN"~"Nordeste",
+                                Estado=="PB"~"Nordeste",
+                                Estado=="PE"~"Nordeste",
+                                Estado=="AL"~"Nordeste",
+                                Estado=="SE"~"Nordeste",
+                                Estado=="BA"~"Nordeste",
+                                Estado=="MG"~"Sudeste",
+                                Estado=="ES"~"Sudeste",
+                                Estado=="RJ"~"Sudeste",
+                                Estado=="SP"~"Sudeste",
+                                Estado=="PR"~"Sul",
+                                Estado=="SC"~"Sul",
+                                Estado=="RS"~"Sul",
+                                Estado=="MS"~"Centro-Oeste",
+                                Estado=="MT"~"Centro-Oeste",
+                                Estado=="GO"~"Centro-Oeste",
+                                Estado=="DF"~"Centro-Oeste"),
+         Municipio = str_replace(Municipio, "D Oeste", "D'Oeste"),
+         Municipio = str_replace(Municipio, "D Arco", "D'Arco"),
+         Municipio = str_replace(Municipio, "Poxoreo", "Poxoreu"),
+         Municipio = str_replace(Municipio, "Fortaleza do Tabocao", "Tabocao"),
+         Municipio = str_replace(Municipio, "Pio Xii", "Pio XII"),
+         Municipio = str_replace(Municipio, "Olho D Agua das Cunhas", "Olho d'Agua das Cunhas"))%>% 
+  filter(Municipio!="Ignorado")
+
+n_estab_abatecarne_2017_2021 <- read.delim("estab_mun_abate_prodcarne_2017_2021.csv",
+           header = TRUE, 
+           sep = ";", encoding = "latin1") %>% 
+  rename(Municipio = 'Município',
+         '2017' = X2017,
+         '2018' = X2018,
+         '2019' = X2019,
+         '2020' = X2020,
+         '2021' = X2021) %>% 
+  separate(Municipio, c("Estado", "Municipio"), sep = "-", extra = "merge") %>% 
+  mutate(Estado = toupper(Estado)) %>% 
+  pivot_longer(cols = c('2017','2018','2019','2020','2021'),
+               names_to = "ano",
+               values_to = "n_estabelecimentos") %>%
+  mutate(ano=as.Date(ano, format="%Y"),
+         ano=as.numeric(format(ano, "%Y")),
+         regiao=case_when(Estado=="RO"~"Norte",
+                                Estado=="AC"~"Norte",
+                                Estado=="AM"~"Norte",
+                                Estado=="RR"~"Norte",
+                                Estado=="PA"~"Norte",
+                                Estado=="AP"~"Norte",
+                                Estado=="TO"~"Norte",
+                                Estado=="MA"~"Nordeste",
+                                Estado=="PI"~"Nordeste",
+                                Estado=="CE"~"Nordeste",
+                                Estado=="RN"~"Nordeste",
+                                Estado=="PB"~"Nordeste",
+                                Estado=="PE"~"Nordeste",
+                                Estado=="AL"~"Nordeste",
+                                Estado=="SE"~"Nordeste",
+                                Estado=="BA"~"Nordeste",
+                                Estado=="MG"~"Sudeste",
+                                Estado=="ES"~"Sudeste",
+                                Estado=="RJ"~"Sudeste",
+                                Estado=="SP"~"Sudeste",
+                                Estado=="PR"~"Sul",
+                                Estado=="SC"~"Sul",
+                                Estado=="RS"~"Sul",
+                                Estado=="MS"~"Centro-Oeste",
+                                Estado=="MT"~"Centro-Oeste",
+                                Estado=="GO"~"Centro-Oeste",
+                                Estado=="DF"~"Centro-Oeste"),
+         Municipio = str_replace(Municipio, "D Oeste", "D'Oeste"),
+         Municipio = str_replace(Municipio, "D Arco", "D'Arco"),
+         Municipio = str_replace(Municipio, "Poxoreo", "Poxoreu"),
+         Municipio = str_replace(Municipio, "Fortaleza do Tabocao", "Tabocao"),
+         Municipio = str_replace(Municipio, "Pio Xii", "Pio XII"),
+         Municipio = str_replace(Municipio, "Olho D Agua das Cunhas", "Olho d'Agua das Cunhas"))%>% 
+  filter(Municipio!="Ignorado")
+
+n_estab_abatecarne_2003_2021 <- rbind(n_estab_abatecarne_2003_2005, n_estab_abatecarne_2006_2016, n_estab_abatecarne_2017_2021)
+
+rm(n_estab_abatecarne_2003_2005, n_estab_abatecarne_2006_2016, n_estab_abatecarne_2017_2021)
+
+set.seed(12736)
+n_estab_abatecarne_2003_2021 %>% 
+  sample_n(100)
+```
+
+4. Amostra randômica com 100 observações dos dados completos do número de vínculos (celetistas e não-celetistas) dos estabelecimentos de abate de carne bovina, por município brasileiro (2003-2021, RAIS):
+
+```{r}
+n_vinculos_ind_carne_2003_2005 <- read.delim("vinculo_mun_abate_prodcarne_2003_2005.csv",
+           header = TRUE, 
+           sep = ";", encoding = "latin1") %>% 
+  rename(Municipio = 'Município',
+         '2005' = X2005,
+         '2004' = X2004,
+         '2003' = X2003) %>% 
+  separate(Municipio, c("Estado", "Municipio"), sep = "-", extra = "merge") %>% 
+  mutate(Estado = toupper(Estado)) %>% 
+  pivot_longer(cols = c('2005', '2004','2003'),
+               names_to = "ano",
+               values_to = "n_vinculos") %>%
+  mutate(ano=as.Date(ano, format="%Y"),
+         ano=as.numeric(format(ano, "%Y")),
+         regiao=case_when(Estado=="RO"~"Norte",
+                                Estado=="AC"~"Norte",
+                                Estado=="AM"~"Norte",
+                                Estado=="RR"~"Norte",
+                                Estado=="PA"~"Norte",
+                                Estado=="AP"~"Norte",
+                                Estado=="TO"~"Norte",
+                                Estado=="MA"~"Nordeste",
+                                Estado=="PI"~"Nordeste",
+                                Estado=="CE"~"Nordeste",
+                                Estado=="RN"~"Nordeste",
+                                Estado=="PB"~"Nordeste",
+                                Estado=="PE"~"Nordeste",
+                                Estado=="AL"~"Nordeste",
+                                Estado=="SE"~"Nordeste",
+                                Estado=="BA"~"Nordeste",
+                                Estado=="MG"~"Sudeste",
+                                Estado=="ES"~"Sudeste",
+                                Estado=="RJ"~"Sudeste",
+                                Estado=="SP"~"Sudeste",
+                                Estado=="PR"~"Sul",
+                                Estado=="SC"~"Sul",
+                                Estado=="RS"~"Sul",
+                                Estado=="MS"~"Centro-Oeste",
+                                Estado=="MT"~"Centro-Oeste",
+                                Estado=="GO"~"Centro-Oeste",
+                                Estado=="DF"~"Centro-Oeste"),
+         Municipio = str_replace(Municipio, "D Oeste", "D'Oeste"),
+         Municipio = str_replace(Municipio, "D Arco", "D'Arco"),
+         Municipio = str_replace(Municipio, "Poxoreo", "Poxoreu"),
+         Municipio = str_replace(Municipio, "Fortaleza do Tabocao", "Tabocao"),
+         Municipio = str_replace(Municipio, "Pio Xii", "Pio XII"),
+         Municipio = str_replace(Municipio, "Olho D Agua das Cunhas", "Olho d'Agua das Cunhas"))%>% 
+  filter(Municipio!="Ignorado")
+
+n_vinculos_ind_carne_2006_2016 <- read.delim("vinculo_mun_abate_prodcarne_2006_2016.csv",
+           header = TRUE, 
+           sep = ";", encoding = "latin1") %>% 
+  rename(Municipio = 'Município',
+         '2006' = X2006,
+         '2007' = X2007,
+         '2008' = X2008,
+         '2009' = X2009,
+         '2010' = X2010,
+         '2011' = X2011,
+         '2012' = X2012,
+         '2013' = X2013,
+         '2014' = X2014,
+         '2015' = X2015,
+         '2016' = X2016) %>% 
+  separate(Municipio, c("Estado", "Municipio"), sep = "-", extra = "merge") %>% 
+  mutate(Estado = toupper(Estado)) %>% 
+  pivot_longer(cols = c('2006', '2007','2008','2009','2010','2011','2012',
+                        '2013','2014','2015','2016'),
+               names_to = "ano",
+               values_to = "n_vinculos") %>%
+  mutate(ano=as.Date(ano, format="%Y"),
+         ano=as.numeric(format(ano, "%Y")),
+         regiao=case_when(Estado=="RO"~"Norte",
+                                Estado=="AC"~"Norte",
+                                Estado=="AM"~"Norte",
+                                Estado=="RR"~"Norte",
+                                Estado=="PA"~"Norte",
+                                Estado=="AP"~"Norte",
+                                Estado=="TO"~"Norte",
+                                Estado=="MA"~"Nordeste",
+                                Estado=="PI"~"Nordeste",
+                                Estado=="CE"~"Nordeste",
+                                Estado=="RN"~"Nordeste",
+                                Estado=="PB"~"Nordeste",
+                                Estado=="PE"~"Nordeste",
+                                Estado=="AL"~"Nordeste",
+                                Estado=="SE"~"Nordeste",
+                                Estado=="BA"~"Nordeste",
+                                Estado=="MG"~"Sudeste",
+                                Estado=="ES"~"Sudeste",
+                                Estado=="RJ"~"Sudeste",
+                                Estado=="SP"~"Sudeste",
+                                Estado=="PR"~"Sul",
+                                Estado=="SC"~"Sul",
+                                Estado=="RS"~"Sul",
+                                Estado=="MS"~"Centro-Oeste",
+                                Estado=="MT"~"Centro-Oeste",
+                                Estado=="GO"~"Centro-Oeste",
+                                Estado=="DF"~"Centro-Oeste"),
+         Municipio = str_replace(Municipio, "D Oeste", "D'Oeste"),
+         Municipio = str_replace(Municipio, "D Arco", "D'Arco"),
+         Municipio = str_replace(Municipio, "Poxoreo", "Poxoreu"),
+         Municipio = str_replace(Municipio, "Fortaleza do Tabocao", "Tabocao"),
+         Municipio = str_replace(Municipio, "Pio Xii", "Pio XII"),
+         Municipio = str_replace(Municipio, "Olho D Agua das Cunhas", "Olho d'Agua das Cunhas"))%>% 
+  filter(Municipio!="Ignorado")
+
+n_vinculos_ind_carne_2017_2021 <- read.delim("vinculo_mun_abate_prodcarne_2017_2021.csv",
+           header = TRUE, 
+           sep = ";", encoding = "latin1") %>% 
+  rename(Municipio = 'Município',
+         '2017' = X2017,
+         '2018' = X2018,
+         '2019' = X2019,
+         '2020' = X2020,
+         '2021' = X2021) %>% 
+  separate(Municipio, c("Estado", "Municipio"), sep = "-", extra = "merge") %>% 
+  mutate(Estado = toupper(Estado)) %>% 
+  pivot_longer(cols = c('2017','2018','2019','2020','2021'),
+               names_to = "ano",
+               values_to = "n_vinculos") %>%
+  mutate(ano=as.Date(ano, format="%Y"),
+         ano=as.numeric(format(ano, "%Y")),
+         regiao=case_when(Estado=="RO"~"Norte",
+                                Estado=="AC"~"Norte",
+                                Estado=="AM"~"Norte",
+                                Estado=="RR"~"Norte",
+                                Estado=="PA"~"Norte",
+                                Estado=="AP"~"Norte",
+                                Estado=="TO"~"Norte",
+                                Estado=="MA"~"Nordeste",
+                                Estado=="PI"~"Nordeste",
+                                Estado=="CE"~"Nordeste",
+                                Estado=="RN"~"Nordeste",
+                                Estado=="PB"~"Nordeste",
+                                Estado=="PE"~"Nordeste",
+                                Estado=="AL"~"Nordeste",
+                                Estado=="SE"~"Nordeste",
+                                Estado=="BA"~"Nordeste",
+                                Estado=="MG"~"Sudeste",
+                                Estado=="ES"~"Sudeste",
+                                Estado=="RJ"~"Sudeste",
+                                Estado=="SP"~"Sudeste",
+                                Estado=="PR"~"Sul",
+                                Estado=="SC"~"Sul",
+                                Estado=="RS"~"Sul",
+                                Estado=="MS"~"Centro-Oeste",
+                                Estado=="MT"~"Centro-Oeste",
+                                Estado=="GO"~"Centro-Oeste",
+                                Estado=="DF"~"Centro-Oeste"),
+         Municipio = str_replace(Municipio, "D Oeste", "D'Oeste"),
+         Municipio = str_replace(Municipio, "D Arco", "D'Arco"),
+         Municipio = str_replace(Municipio, "Poxoreo", "Poxoreu"),
+         Municipio = str_replace(Municipio, "Fortaleza do Tabocao", "Tabocao"),
+         Municipio = str_replace(Municipio, "Pio Xii", "Pio XII"),
+         Municipio = str_replace(Municipio, "Olho D Agua das Cunhas", "Olho d'Agua das Cunhas"))%>% 
+  filter(Municipio!="Ignorado")
+
+n_vinculos_abatecarne_2003_2021 <- rbind(n_vinculos_ind_carne_2003_2005, n_vinculos_ind_carne_2006_2016, n_vinculos_ind_carne_2017_2021)
+
+rm(n_vinculos_ind_carne_2003_2005, n_vinculos_ind_carne_2006_2016, n_vinculos_ind_carne_2017_2021)
+
+set.seed(89247)
+n_vinculos_abatecarne_2003_2021 %>% 
+  sample_n(100)
+```
+
+```{r}
+#Criando um data frame com dados dos municípios da amazônia legal para ser usado como filtro
+url <- "https://geoftp.ibge.gov.br/organizacao_do_territorio/estrutura_territorial/amazonia_legal/2022/Municipios_da_Amazonia_Legal_2022.xlsx"
+
+destfile <- "ministerio_agricultura_abate_por_ano_UF_procedencia.xlsx"
+
+download.file(url, destfile, mode = "wb")
+
+mun_am_legal_filter1 <- read.xlsx2(destfile, 1) %>% 
+                  rename(Municipio=NM_MUN,
+                         Estado=SIGLA_UF) %>% 
+                  mutate(Municipio=stringi::stri_trans_general(str = Municipio, id = "Latin-ASCII"),
+                  Municipio=str_replace(Municipio, "Mirassol d'Oeste", "Mirassol D'Oeste"))
+```
+5. Amostra randômica com 100 observações dos dados completos do número de estabelecimentos de criação bovina nos municípios da Amazônia Legal (2003-2021, RAIS):
+
+```{r}
+n_estab_criacao_bovina_am_legal_2003_2021 <- mun_am_legal_filter1 %>% left_join(n_estab_criacao_bovina_2003_2021,by=c("Estado", "Municipio")) %>% 
+  select(c(CD_MUN, CD_UF, Estado, Municipio, ano, n_estabelecimentos))
+
+set.seed(45372)
+n_estab_criacao_bovina_am_legal_2003_2021 %>% 
+  sample_n(100)
+```
+
+```{r}
+#construindo função para retornar crescimento absoluto e taxa de crescimento por ano
+
+cresc_calc <- function(arg1, var="n_estabelecimentos") {
+  if(var == "n_estabelecimentos"){
+        calc <-   arg1 %>% 
+            group_by(ano) %>% 
+            tally(n_estabelecimentos) %>% 
+            ungroup() %>% 
+            mutate(cresc_abs=n-lag(n)) %>% 
+            mutate_all(~replace(., is.na(.), 0))%>% 
+            mutate(tx_cres=(cresc_abs*100/lag(n)) %>% 
+            round(digits=2))%>% 
+            mutate_all(~replace(., is.na(.), 0)) %>% 
+            select(ano, cresc_abs, tx_cres)
+  
+  return(calc)
+  } else if (var == "n_vinculos"){
+      calc <-   arg1 %>% 
+            group_by(ano) %>% 
+            tally(n_vinculos) %>% 
+            ungroup() %>% 
+            mutate(cresc_abs=n-lag(n)) %>% 
+            mutate_all(~replace(., is.na(.), 0))%>% 
+            mutate(tx_cres=(cresc_abs*100/lag(n)) %>% 
+            round(digits=2))%>% 
+            mutate_all(~replace(., is.na(.), 0)) %>% 
+            select(ano, cresc_abs, tx_cres)
+  
+  return(calc) 
+  } else if (var == "n_bovinos"){
+      calc <-   arg1 %>% 
+            group_by(ano) %>% 
+            tally(n_bovinos) %>% 
+            ungroup() %>% 
+            mutate(cresc_abs=n-lag(n)) %>% 
+            mutate_all(~replace(., is.na(.), 0))%>% 
+            mutate(tx_cres=(cresc_abs*100/lag(n)) %>% 
+            round(digits=2))%>% 
+            mutate_all(~replace(., is.na(.), 0)) %>% 
+            select(ano, cresc_abs, tx_cres)
+  
+  return(calc) 
+  }
+}
+```
+
+
+6. Crescimento Absoluto e Taxa de crescimento do número de estabelecimentos de criação bovina no Brasil (RAIS, 2003-2021):
+
+```{r}
+cresc_calc(n_estab_criacao_bovina_2003_2021, var = "n_estabelecimentos") %>% 
+  mutate(regiao="Brasil")
+```
+
+7. Crescimento Absoluto e Taxa de crescimento do número de estabelecimentos de criação bovina na Amazônia Legal (RAIS, 2003-2021):
+```{r}
+cresc_calc(n_estab_criacao_bovina_am_legal_2003_2021, var = "n_estabelecimentos") %>% 
+  mutate(regiao="Amazônia Legal")
+```
+
+8. Amostra randômica com 100 observações dos dados completos do número de vínculos (celetistas e não-celetistas) dos estabelecimentos de criação bovina nos municípios da Amazônia Legal (RAIS, 2003-2021):
+
+```{r}
+n_vinculos_criacao_bovina_am_legal_2003_2021 <- mun_am_legal_filter1 %>% left_join(n_vinculos_criacao_bovina_2003_2021,by=c("Estado", "Municipio")) %>% 
+  select(c(CD_MUN, CD_UF, Estado, Municipio, ano, n_vinculos))
+
+set.seed(61897)
+n_vinculos_criacao_bovina_am_legal_2003_2021 %>% 
+  sample_n(100)
+```
+
+9. Crescimento Absoluto e Taxa de crescimento do número de vínculos totais em estabelecimentos de criação bovina no Brasil (RAIS, 2003-2021):
+```{r}
+cresc_calc(n_vinculos_criacao_bovina_2003_2021, var = "n_vinculos") %>% 
+  mutate(regiao="Brasil")
+```
+
+10.  Crescimento Absoluto e Taxa de crescimento do número de vínculos totais em estabelecimentos de criação bovina na Amazônial Legal (RAIS, 2003-2021):
+
+```{r}
+cresc_calc(n_vinculos_criacao_bovina_am_legal_2003_2021, var = "n_vinculos") %>% 
+  mutate(regiao="Amazônia Legal")
+```
+11. Amostra randômica com 100 observações dos dados completos do número de estabelecimentos de abate de carne bovina nos municípios da Amazônia Legal (RAIS, 2003-2021):
+
+```{r}
+n_estab_abatecarne_am_legal_2003_2021 <- mun_am_legal_filter1 %>% left_join(n_estab_abatecarne_2003_2021,by=c("Estado", "Municipio")) %>% 
+  select(c(CD_MUN, CD_UF, Estado, Municipio, ano, n_estabelecimentos))
+
+set.seed(35476)
+n_estab_abatecarne_am_legal_2003_2021 %>% 
+  sample_n(100)
+```
+
+12. Crescimento Absoluto e Taxa de crescimento do número de estabelecimentos de abate de carne bovina no Brasil (RAIS, 2003-2021):
+
+```{r}
+cresc_calc(n_estab_abatecarne_2003_2021, var = "n_estabelecimentos") %>% 
+  mutate(regiao="Brasil")
+```
+
+13. Crescimento Absoluto e Taxa de crescimento do número de estabelecimentos de abate de carne bovina na Amazônia Legal (RAIS, 2003-2021):
+
+```{r}
+cresc_calc(n_estab_abatecarne_am_legal_2003_2021, var = "n_estabelecimentos") %>% 
+  mutate(regiao="Amazônia Legal")
+```
+
+
+14. Amostra randômica com 100 observações dos dados completos do número de vínculos (celetistas e não-celetistas) dos estabelecimentos de abate de carne bovina nos municípios da Amazônia Legal (RAIS, 2003-2021):
+
+```{r}
+n_vinculos_abatecarne_am_legal_2003_2021 <- mun_am_legal_filter1 %>% left_join(n_vinculos_abatecarne_2003_2021,by=c("Estado", "Municipio")) %>% 
+  select(c(CD_MUN, CD_UF, Estado, Municipio, ano, n_vinculos))
+
+set.seed(826574)
+n_vinculos_abatecarne_am_legal_2003_2021 %>% 
+  sample_n(100)
+```
+15. Crescimento Absoluto e Taxa de crescimento do número de vínculos totais em estabelecimentos de abate de carne bovina no Brasil (RAIS, 2003-2021): 
+
+```{r}
+cresc_calc(n_vinculos_abatecarne_2003_2021, var = "n_vinculos") %>% 
+  mutate(regiao="Brasil")
+```
+
+16. Crescimento Absoluto e Taxa de crescimento do número de vínculos totais em estabelecimentos de abate de carne bovina na Amazônia Legal (RAIS, 2003-2021):
+
+```{r}
+cresc_calc(n_vinculos_abatecarne_am_legal_2003_2021, var = "n_vinculos") %>% 
+  mutate(regiao="Amazônia Legal")
+```
+
+
+17. 100 municípios da Amazônia Legal com maior número de cabeças de gado (Pesquisa Pecuária Municipal - PPM, IBGE):
+
+```{r}
+ppm_bovinos <- read.delim("ppm_bovinos.csv",
+           header = TRUE, 
+           sep = ";", encoding = "UTF-8") %>%
+  separate(Município, c("Município", "Estado"), sep = "\\s*\\(") %>% 
+  rename(Municipio=Município) %>% 
+  mutate(Estado = str_remove(Estado, "\\s*\\)")) %>% 
+  pivot_longer(cols = c('X2003', 'X2004' , 'X2005', 'X2006', 'X2007',
+                        'X2008', 'X2009', 'X2010', 'X2011', 'X2012',
+                        'X2013', 'X2014', 'X2015', 'X2016', 'X2017',
+                        'X2018', 'X2019', 'X2020', 'X2021', 'X2022'),
+               names_to = "ano",
+               values_to = "n_bovinos") %>% 
+  mutate(ano=as.numeric(str_remove(ano, "X")),
+         n_bovinos= as.numeric(str_replace(n_bovinos, "\\...", "0"))) %>% 
+  replace_na(list(n_bovinos = 0L)) %>% 
+  select(-Nível)
+
+mun_am_legal_filter2 <-  read.xlsx2(destfile, 1) %>% 
+                            rename(Municipio=NM_MUN,
+                                   Estado=SIGLA_UF)
+
+
+top_100_mun_bovinos_am_legal <- mun_am_legal_filter2 %>% 
+  left_join(ppm_bovinos, by=c("Estado", "Municipio")) %>%
+                        filter(ano==2022) %>% 
+                        arrange(-n_bovinos) %>% 
+                        top_n(100)
+
+top_100_mun_bovinos_am_legal %>% 
+  select(c(CD_MUN,NM_UF, Estado, Municipio, n_bovinos, ano))
+```
+18. Crescimento Absoluto  e Taxa de crescimento do número de cabeças de gado no Brasil (PPM, 2003-2021):
+
+```{r}
+cresc_calc(ppm_bovinos, var = "n_bovinos") %>% 
+  mutate(regiao="Brasil")
+```
+
+19. Taxa de crescimento do número de cabeças de gado na Amazônia Legal (PPM, 2003-2021):
+
+```{r}
+ppm_bovinos_am_legal <- mun_am_legal_filter2 %>% 
+  left_join(ppm_bovinos, by=c("Estado", "Municipio")) %>% 
+  select(c(CD_MUN,NM_UF, Estado, Municipio, n_bovinos, ano))
+  
+cresc_calc(ppm_bovinos_am_legal, var = "n_bovinos") %>% 
+  mutate(regiao="Amazônia Legal")
+```
+
+
+```{r, include=FALSE}
+#loading Brazil spatial municipality data
+geobr_mun_2022 <- read_municipality(code_muni = "all", year = 2022, simplified = FALSE)
+
+## create a directory to which the images will be written
+dir_out <- file.path(tempdir(), "criacao_bov_BR")
+dir.create(dir_out, recursive = TRUE)
+
+## get a sorted list of unique years in the TX housing dataset
+years <- 2003:2022
+
+## loop through years ...
+## subset data ...
+## create barplot of sales by month for each year ...
+## write plot to file
+for (y in years) {
+  
+  p <-
+    ppm_bovinos %>% 
+  filter(ano==y) %>% 
+  rename(code_muni=Cód.) %>% 
+  select(c(code_muni, n_bovinos)) %>% 
+  left_join(geobr_mun_2022, by="code_muni") %>% 
+   st_sf() %>%
+  ggplot() +
+  geom_sf(aes(fill=n_bovinos), color=NA, alpha=1)+
+  annotate("text", x=-73.5, y=7.5, label=as.character(y))+
+  theme_minimal()+
+  theme(axis.text.x =element_blank(), 
+        axis.text.y = element_blank(), 
+        axis.title.x = element_blank(), 
+        axis.title.y = element_blank())+
+  labs(fill="n. of cattle in the municipality")+
+  scale_fill_viridis(
+    option = "inferno",
+    direction = -1,
+    na.value = "#000004FF",
+    breaks = c(0, 100000, 200000, 300000, 400000, 500000),
+    labels = c("0", "50000", "100000", "150000", "200000", "500000+"),
+    limits =c(0, 500000)
+  )
+  
+  fp <- file.path(dir_out, paste0(y, ".png"))
+  
+  ggsave(plot = p, 
+         filename = fp, 
+         device = "png")
+
+}
+
+## list file names and read in
+imgs <- list.files(dir_out, full.names = TRUE)
+img_list <- lapply(imgs, image_read)
+
+## join the images together
+img_joined <- image_join(img_list)
+
+## animate at 2 frames per second
+img_animated <- image_animate(img_joined, fps = 2)
+
+## save to disk
+image_write(image = img_animated,
+            path = "criacao_bov_BR.gif")
+```
+
+20. Evolução do número de cabeças de gado por município brasileiro segundo a Pesquisa Pecuária Municipal:
+
+```{r}
+## view animated image
+img_animated
+```
+
+
+
